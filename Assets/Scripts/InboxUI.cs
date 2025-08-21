@@ -6,8 +6,11 @@ using UnityEngine.Networking;
 using Newtonsoft.Json.Linq;
 using TMPro;
 using UnityEngine.UI;
-using System.Runtime.Serialization;
+using System.Collections.Generic;
 
+/// <summary>
+/// Handles authentication, fetching inbox messages, and creating message UI prefabs.
+/// </summary>
 public class InboxUI : MonoBehaviour {
 	[Header("MSAL Config")]
 	[SerializeField] private string clientId = "16527e35-0698-46b3-a890-562410a382ed";
@@ -17,7 +20,7 @@ public class InboxUI : MonoBehaviour {
 	[Header("UI Prefabs/Parents")]
 	public GameObject messagePrefab; // Your Message prefab
 	public Transform contentParent;   // The ScrollView Content object
-	[SerializeField] private TextMeshProUGUI emailName;
+	[SerializeField] private TextMeshProUGUI emailName; // top-bar label for user
 
 	private string userEmail;
 	private string cacheFilePath;
@@ -40,6 +43,9 @@ public class InboxUI : MonoBehaviour {
 		}
 	}
 
+	// --------------------------
+	// MSAL Token cache handling
+	// --------------------------
 	private void ConfigureTokenCache(ITokenCache tokenCache) {
 		tokenCache.SetBeforeAccess(args => {
 			if (System.IO.File.Exists(cacheFilePath)) {
@@ -93,9 +99,12 @@ public class InboxUI : MonoBehaviour {
 		return mail;
 	}
 
-
+	// --------------------------
+	// Fetch inbox + build UI
+	// --------------------------
 	private async Task FetchInbox(string accessToken) {
-		string url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=10&$select=subject,from,receivedDateTime";
+		// Add toRecipients + bodyPreview for reading pane
+		string url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=10&$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview";
 
 		UnityWebRequest request = UnityWebRequest.Get(url);
 		request.SetRequestHeader("Authorization", "Bearer " + accessToken);
@@ -112,38 +121,28 @@ public class InboxUI : MonoBehaviour {
 		string json = request.downloadHandler.text;
 		JObject data = JObject.Parse(json);
 
+		// Clear old items
 		foreach (Transform child in contentParent) {
-			Destroy(child.gameObject); // clear old messages
+			Destroy(child.gameObject);
 		}
 
+		// Build inbox
 		foreach (var msg in data["value"]) {
-			string sender = msg["from"]?["emailAddress"]?["address"]?.ToString() ?? "(unknown)";
-			string subject = msg["subject"]?.ToString() ?? "(no subject)";
-			string date = msg["receivedDateTime"]?.ToString() ?? "";
+			EmailData email = new EmailData {
+				Id = msg["id"]?.ToString(),
+				From = msg["from"]?["emailAddress"]?["address"]?.ToString() ?? "(unknown)",
+				To = msg["toRecipients"] != null
+					? string.Join(", ", msg["toRecipients"].Select(r => r["emailAddress"]?["address"]?.ToString()))
+					: "",
+				Subject = msg["subject"]?.ToString() ?? "(no subject)",
+				Date = msg["receivedDateTime"]?.ToString(),
+				Body = msg["bodyPreview"]?.ToString() ?? ""
+			};
 
+			// Instantiate prefab
 			GameObject go = Instantiate(messagePrefab, contentParent);
-
-			var fromField = go.transform.Find("From/From (1)")?.GetComponent<TextMeshProUGUI>();
-			var subjectField = go.transform.Find("Subject")?.GetComponent<TextMeshProUGUI>();
-			var dateField = go.transform.Find("DateSent")?.GetComponent<TextMeshProUGUI>();
-
-			if (fromField != null) fromField.text = sender;
-			if (subjectField != null) subjectField.text = subject;
-			if (dateField != null) dateField.text = date;
-
-			var mover = go.AddComponent<RightUISliderMover>();
-			mover.Initialize(
-				SceneRefs.Instance.chevron,
-				SceneRefs.Instance.topLine,
-				SceneRefs.Instance.bottomLine,
-				SceneRefs.Instance.highlight
-			);
-
-			// Hook up the button click at runtime
-			Button btn = go.GetComponent<Button>();
-			if (btn != null) {
-				btn.onClick.AddListener(() => mover.MoveToTarget(go.GetComponent<RectTransform>()));
-			}
+			MessageUI ui = go.AddComponent<MessageUI>();
+			ui.SetData(email);
 		}
 	}
 }
