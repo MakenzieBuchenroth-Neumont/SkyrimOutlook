@@ -7,5 +7,7 @@ public class EmailData {
 	public string To;
 	public string Subject;
 	public string Date;
-	public string Body;
+	public string BodyPreview;
+	public string BodyContent;
+	public string BodyContentType;
 }

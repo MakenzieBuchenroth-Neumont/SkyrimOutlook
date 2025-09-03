@@ -104,7 +104,8 @@ public class InboxUI : MonoBehaviour {
 	// --------------------------
 	private async Task FetchInbox(string accessToken) {
 		// Add toRecipients + bodyPreview for reading pane
-		string url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=10&$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview";
+		string url = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages" +
+				 "?$top=10&$select=id,subject,from,receivedDateTime,bodyPreview";
 
 		UnityWebRequest request = UnityWebRequest.Get(url);
 		request.SetRequestHeader("Authorization", "Bearer " + accessToken);
@@ -118,31 +119,42 @@ public class InboxUI : MonoBehaviour {
 			return;
 		}
 
-		string json = request.downloadHandler.text;
-		JObject data = JObject.Parse(json);
+		JObject data = JObject.Parse(request.downloadHandler.text);
 
-		// Clear old items
-		foreach (Transform child in contentParent) {
+		foreach (Transform child in contentParent)
 			Destroy(child.gameObject);
-		}
 
-		// Build inbox
 		foreach (var msg in data["value"]) {
 			EmailData email = new EmailData {
 				Id = msg["id"]?.ToString(),
 				From = msg["from"]?["emailAddress"]?["address"]?.ToString() ?? "(unknown)",
-				To = msg["toRecipients"] != null
-					? string.Join(", ", msg["toRecipients"].Select(r => r["emailAddress"]?["address"]?.ToString()))
-					: "",
 				Subject = msg["subject"]?.ToString() ?? "(no subject)",
-				Date = msg["receivedDateTime"]?.ToString(),
-				Body = msg["bodyPreview"]?.ToString() ?? ""
+				Date = msg["receivedDateTime"]?.ToString() ?? "",
+				BodyPreview = msg["bodyPreview"]?.ToString() ?? ""
 			};
 
-			// Instantiate prefab
 			GameObject go = Instantiate(messagePrefab, contentParent);
-			MessageUI ui = go.AddComponent<MessageUI>();
-			ui.SetData(email);
+			// add or get mover
+			var mover = go.GetComponent<RightUISliderMover>();
+			if (mover == null) mover = go.AddComponent<RightUISliderMover>();
+
+			// initialize with the shared chevron/lines/highlight
+			mover.Initialize(
+				SceneRefs.Instance.chevron,
+				SceneRefs.Instance.topLine,
+				SceneRefs.Instance.bottomLine,
+				SceneRefs.Instance.highlight
+			);
+
+			// then set up MessageUI
+			var msgUI = go.GetComponent<MessageUI>();
+			if (msgUI != null) {
+				msgUI.SetData(email, accessToken, mover);
+			}
+
+			var pano = FindObjectOfType<UIPanoramaScroll>();
+			if (pano != null)
+				pano.RegisterTextsFrom(go);
 		}
 	}
 }
